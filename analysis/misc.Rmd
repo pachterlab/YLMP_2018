@@ -1,0 +1,222 @@
+---
+title: "misc"
+author: "Lauren"
+date: "9/4/2018"
+output: html_document
+---
+
+```{r}
+library(dplyr)
+library(ggplot2)
+library(reshape2)
+```
+
+# Mapped and unmapped reads.
+
+For genome aligner input.
+
+```{r}
+base_path <- "~/reads/human/"
+#base_path <- "~/reads/human/sims/"
+
+methods <- c("HISAT2", "quant")
+
+datasets <- "SRR3191542"
+#datasets <- "1"
+```
+
+```{r}
+allQNames <- read.table(paste0(base_path, datasets, "/QNames.out"), header=FALSE, col.names=c("QName"), stringsAsFactors=FALSE)
+#allQNames <- read.table(paste0(base_path, datasets, ".QNames.out"), header=FALSE, col.names=c("QName"), stringsAsFactors=FALSE)
+```
+
+```{r}
+read_mapped_table <- function(m, remainderName) {
+#    table <- read.table(paste0(base_path, datasets, ".", m, ".read.dist.tsv"), header=FALSE, col.names=c("QName", "Category"), sep='\t', stringsAsFactors=FALSE)
+    table <- read.table(paste0(base_path, datasets, "/", m, "/read.dist.tsv"), header=FALSE, col.names=c("QName", "Category"), sep='\t', stringsAsFactors=FALSE)
+    temp <- anti_join(allQNames, table, by="QName")
+    if (nrow(temp) != 0) {
+        temp$Category <- remainderName
+        table <- rbind(table, temp)
+    }
+    table
+}
+```
+
+```{r}
+mapped <- lapply(methods, function(m) read_mapped_table(m, "aligned outside"))
+mapped <- Reduce(function(x, y) full_join(x, y, by="QName"), mapped)
+colnames(mapped) <- c("QName", methods)
+head(mapped)
+tail(mapped)
+```
+
+```{r}
+temp <- melt(mapped, id.vars=c("QName"), variable.name="Method", value.name="Category")
+temp$Category <- as.factor(temp$Category)
+temp$Category <- factor(temp$Category, levels=c("aligned outside", "unmapped/unaligned", "unmapped/aligned", "mapped"))
+g <- ggplot(temp, aes(x=Method, fill=Category)) + geom_bar(width=.7) + scale_fill_manual(values=c("#CACFD2", "#E74C3C", "#F7DC6F", "#82E0AA")) + geom_text(stat='count', aes(label=..count..), position = position_stack(vjust = 0.5))
+ggsave(paste0("~/reads/human/images/", datasets, ".read.dist.png"))
+rm(temp)
+```
+
+For now, only work with two methods.
+
+```{r}
+nrow(mapped[mapped$HISAT2 == "aligned outside" & mapped$quant == "unmapped/unaligned",])
+nrow(mapped[mapped$HISAT2 == "unmapped/aligned" & mapped$quant == "unmapped/unaligned",])
+nrow(mapped[mapped$HISAT2 == "mapped" & mapped$quant == "unmapped/unaligned",])
+nrow(mapped[mapped$HISAT2 == "aligned outside" & mapped$quant == "mapped",])
+nrow(mapped[mapped$HISAT2 == "unmapped/unaligned" & mapped$quant == "mapped",])
+nrow(mapped[mapped$HISAT2 == "unmapped/aligned" & mapped$quant == "mapped",])
+```
+
+```{r}
+temp <- mapped %>% filter(HISAT2 == "unmapped/aligned" & quant == "mapped")
+write(temp$QName, file = paste0(base_path, datasets, ".diff.4.out"))
+rm(temp)
+```
+
+Clean-up.
+
+```{r}
+rm(mapped, allQNames, read_mapped_table)
+```
+
+# Runtime plots.
+Load table.
+
+```{r}
+timetable <- read.table("~/reads/human/SRR4045931/timecourse/times.tsv", header=TRUE, sep='\t')
+head(timetable)
+tail(timetable)
+```
+
+Time vs. reads.
+
+```{r}
+g <- ggplot(timetable, aes(x=Reads, y=Time)) + geom_point() + scale_x_log10("log10(# reads mapped)") + labs(title="Runtime vs. number of reads")
+ggsave("~/reads/human/SRR4045931/timecourse/reads.png")
+```
+
+Time vs. number of chromosomes.
+
+```{r}
+g <- ggplot(timetable, aes(x=Reads, y=Chromosomes)) + geom_point() + labs(title="Runtime vs. number of chromosomes")
+ggsave("~/reads/human/SRR4045931/timecourse/chroms.png")
+```
+
+Time vs. number of alignments.
+
+```{r}
+melted.timetable <- data.frame(AlignedAlignments=timetable$AlignedAlignments, Alignments=timetable$Alignments, Time=timetable$Time)
+melted.timetable <- melt(melted.timetable, id.vars="Time")
+g <- ggplot(melted.timetable, aes(x=value, y=Time, colour=variable)) + geom_point() + labs(title="Runtime vs. number of alignments")
+ggsave("~/reads/human/SRR4045931/timecourse/alignments.png")
+```
+
+Time vs. number of alignments.
+
+```{r}
+g <- ggplot(timetable, aes(x=Alignments, y=Time)) + geom_point(size=.8) + labs(title="Runtime vs. number of alignments") + scale_x_log10("Number of alignments (log10)") + scale_y_log10("Time (log10 sec)")
+ggsave("~/reads/human/SRR4045931/timecourse/scaled.alignments.png")
+```
+
+Time vs. number of reads
+
+```{r}
+melted.timetable <- data.frame(MappedReads=timetable$MappedReads, Reads=timetable$Reads, Time=timetable$Time)
+melted.timetable <- melt(melted.timetable, id.vars="Time")
+g <- ggplot(melted.timetable, aes(x=value, y=Time, colour=variable)) + geom_point() + labs(title="Runtime vs. number of reads")
+ggsave("~/reads/human/SRR4045931/timecourse/reads.png")
+```
+
+Actually, let's just plot everything together.
+This appears to have been a bad idea. I'm not sure what I expected.
+
+```{r}
+melted.timetable <- melt(timetable, id.vars="Time")
+g <- ggplot(melted.timetable, aes(x=value, y=Time, colour=variable)) + geom_point() + labs(title="Runtime vs. everything") + scale_x_log10("Value (log10") + scale_y_log10("Time (log10 sec)")
+ggsave("~/reads/human/SRR4045931/timecourse/plot.png")
+```
+
+Clean-up.
+
+```{r}
+rm(timetable, g, melted.timetable)
+```
+
+# Trying to figure out Salmon.
+
+Read in Lior's abundances, as well as those you generated.
+
+```{r}
+liorJoint <- read.table("~/joint.txt", header = TRUE, stringsAsFactors = FALSE)
+
+kallisto.rel92 <- read.table("~/reads/human/ERR188140/quant/abundance.tsv", header = TRUE, sep = '\t', stringsAsFactors = FALSE)
+kallisto.rel92 <- data.frame("transcript_id" = kallisto.rel92$target_id, "quant.rel92.31" = kallisto.rel92$est_counts)
+
+temp <- read.table("~/reads/human/ERR188140/quant.25/abundance.tsv", header = TRUE, sep = '\t', stringsAsFactors = FALSE)
+temp <- data.frame("transcript_id" = temp$target_id, "quant.rel92.25" = temp$est_counts)
+kallisto.rel92 <- full_join(kallisto.rel92, temp, by = "transcript_id")
+
+temp <- read.table("~/reads/human/ERR188140/Salmon/abundance_Salmon.tsv", header = TRUE, sep = '\t', stringsAsFactors = FALSE)
+temp <- data.frame("transcript_id" = temp$target_id, "Salmon.kallisto.rel92.31" = temp$est_counts)
+kallisto.rel92 <- full_join(kallisto.rel92, temp, by = "transcript_id")
+
+temp <- read.table("~/reads/human/ERR188140/gcSalmon/abundance_gcSalmon.tsv", header = TRUE, sep = '\t', stringsAsFactors = FALSE)
+temp <- data.frame("transcript_id" = temp$target_id, "gcSalmon.kallisto.rel92.31" = temp$est_counts)
+kallisto.rel92 <- full_join(kallisto.rel92, temp, by = "transcript_id")
+
+temp <- read.table("~/reads/human/ERR188140/Salmon_0.8.2.rel92.31/abundance_Salmon_0.8.2.rel92.31.tsv", header = TRUE, sep = '\t', stringsAsFactors = FALSE)
+temp <- data.frame("transcript_id" = temp$target_id, "Salmon_0.8.2.kallisto.rel92.31" = temp$est_counts)
+kallisto.rel92 <- full_join(kallisto.rel92, temp, by = "transcript_id")
+
+
+salmon.rel92 <- read.table("~/reads/human/ERR188140/Salmon/quant.sf", header = TRUE, sep = '\t', stringsAsFactors = FALSE)
+salmon.rel92 <- data.frame("transcript_id" = salmon.rel92$Name, "salmon.rel92.31" = salmon.rel92$NumReads)
+
+temp <- read.table("~/reads/human/ERR188140/Salmon.25/quant.sf", header = TRUE, sep = '\t', stringsAsFactors = FALSE)
+temp <- data.frame("transcript_id" = temp$Name, "salmon.rel92.25" = temp$NumReads)
+salmon.rel92 <- full_join(salmon.rel92, temp, by = "transcript_id")
+
+temp <- read.table("~/reads/human/ERR188140/gcSalmon/quant.sf", header = TRUE, sep = '\t', stringsAsFactors = FALSE)
+temp <- data.frame("transcript_id" = temp$Name, "gcSalmon.rel92.31" = temp$NumReads)
+salmon.rel92 <- full_join(salmon.rel92, temp, by = "transcript_id")
+
+temp <- read.table("~/reads/human/ERR188140/Salmon.EM/quant.sf", header = TRUE, sep = '\t', stringsAsFactors = FALSE)
+temp <- data.frame("transcript_id" = temp$Name, "Salmon.rel92.31.EM" = temp$NumReads)
+salmon.rel92 <- full_join(salmon.rel92, temp, by = "transcript_id")
+
+temp <- read.table("~/reads/human/ERR188140/Salmon.EM.incompat/quant.sf", header = TRUE, sep = '\t', stringsAsFactors = FALSE)
+temp <- data.frame("transcript_id" = temp$Name, "Salmon.rel92.31.EM.incompat" = temp$NumReads)
+salmon.rel92 <- full_join(salmon.rel92, temp, by = "transcript_id")
+
+
+kallisto.rel80 <- read.table("~/reads/human/ERR188140/quant.rel80.31/abundance.tsv", header = TRUE, sep = '\t', stringsAsFactors = FALSE)
+kallisto.rel80 <- data.frame("transcript_id" = kallisto.rel80$target_id, "kallisto.rel80.31" = kallisto.rel80$est_counts)
+#temp <- read.table("~/reads/human/ERR188140/quant.rel80.25/abundance.tsv", header = TRUE, sep = '\t', stringsAsFactors = FALSE)
+#temp <- data.frame("transcript_id" = temp$Name, "quant.rel80.25" = temp$NumReads)
+#kallisto.rel80 <- full_join(kallisto.rel80, temp, by = "transcript_id")
+
+
+salmon.rel80 <- read.table("~/reads/human/ERR188140/Salmon.rel80.31/quant.sf", header = TRUE, sep = '\t', stringsAsFactors = FALSE)
+salmon.rel80 <- data.frame("transcript_id" = salmon.rel80$Name, "Salmon.rel80.31" = salmon.rel80$NumReads)
+temp <- read.table("~/reads/human/ERR188140/Salmon.rel80.25/quant.sf", header = TRUE, sep = '\t', stringsAsFactors = FALSE)
+temp <- data.frame("transcript_id" = temp$Name, "Salmon.rel80.25" = temp$NumReads)
+salmon.rel80 <- full_join(salmon.rel80, temp, by = "transcript_id")
+
+salmon_0.8.2.rel92.31 <- read.table("~/reads/human/ERR188140/Salmon_0.8.2.rel92.31/quant.sf", header = TRUE, stringsAsFactors = FALSE)
+salmon_0.8.2.rel92.31 <- data.frame("transcript_id" =  salmon_0.8.2.rel92.31$Name, "salmon_0.8.2.rel92.31" = salmon_0.8.2.rel92.31$NumReads)
+
+rm(temp)
+
+selfJoint <- inner_join(kallisto.rel92, kallisto.rel80, by = "transcript_id")
+selfJoint <- inner_join(selfJoint, salmon.rel92, by = "transcript_id")
+selfJoint <- inner_join(selfJoint, salmon.rel80, by = "transcript_id")
+selfJoint <- inner_join(selfJoint, salmon_0.8.2.rel92.31, by = "transcript_id")
+#selfJoint[is.na(selfJoint)] <- 0
+
+allJoint <- inner_join(selfJoint, liorJoint, by = c("transcript_id" = "transcript"))
+#allJoint[is.na(allJoint)] <- 0
+```

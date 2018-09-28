@@ -1,0 +1,334 @@
+---
+title: "EC analysis"
+author: "Lauren"
+date: "8/10/2018"
+output: html_document
+---
+# Analysis of ECs provided by different methods.
+
+I'm required to cite:
+
+Alexander Lex, Nils Gehlenborg, Hendrik Strobelt, Romain Vuillemot, Hanspeter Pfister,
+UpSet: Visualization of Intersecting Sets,
+IEEE Transactions on Visualization and Computer Graphics (InfoVis '14), vol. 20, no. 12, pp. 1983–1992, 2014.
+doi:10.1109/TVCG.2014.2346248
+
+```{r}
+library(UpSetR)
+library(dplyr)
+library(ggplot2)
+```
+
+Read/merge ECs and TSVs.
+
+```{r}
+read_tcc <- function(path) {
+    ec <-read.table(paste0(path, ".ec"), sep = '\t', stringsAsFactors = FALSE)
+    names(ec) <- c("Index", "EC")
+    tsv <- read.table(paste0(path, ".tsv"), sep='\t')
+    tsv$V2 <- NULL
+    names(tsv) <- c("Index", "Count")
+    table <- inner_join(ec, tsv, by = "Index")
+    table$Index <- NULL
+    table <- table[table$Count != 0,]
+    table
+}
+```
+
+Change path here to choose between simulations and Zika datasets.
+
+```{r}
+base_path <- "~/reads/human/"
+#base_path <- "~/reads/human/sims/"
+datasets <- c("SRR3191542", "SRR3191543", "SRR3191544", "SRR3191545")
+#datasets <- c(1:10)
+#datasets <- c("SRR4045930")#, "SRR4045931")
+methods <- c("kallisto", "Salmon_0.8.2", "Salmon", "HISAT2", "STAR")
+ecs <- lapply(datasets, function(d) lapply(methods, function(m) read_tcc(paste0(base_path, d, "/", m, "/matrix"))))
+#ecs <- lapply(datasets, function(d) lapply(methods, function(m) read_tcc(paste0(base_path, d, ".", m))))
+
+methods <- c("kallisto", "Salmon_0.8.2", "Salmon_0.11.2", "HISAT2", "STAR")
+
+ecs <- lapply(seq(length(datasets)), function(i) { names(ecs[[i]]) <- methods; ecs[[i]] })
+
+tail(ecs[[1]][[1]])
+```
+
+## Simple upset plots.
+
+```{r}
+to_plot <- lapply(ecs, function(e) lapply(e, function(x) x$EC))
+to_plot <- lapply(seq(length(datasets)), function(j) { names(to_plot[[j]]) <- methods; to_plot[[j]] })
+
+invisible(lapply(seq(length(datasets)), function(j) {
+    pdf(file=paste0("~/reads/human/images/", datasets[[j]], ".upset.pdf"), onefile=FALSE)
+    upset(fromList(to_plot[[j]]), sets=methods, keep.order=TRUE, order.by="freq")
+    dev.off();
+}))
+```
+
+## Not-so-simple upset plots.
+Weight by counts.
+
+```{r}
+get_intersect_table <- function(tables, m) {
+    temp1 <- Reduce(function(x, y) inner_join(x, y, by="EC"), tables[names(tables) %in% m])
+    #  if (length(temp1) == 0) {
+    #    temp1 <- data.frame(EC=character(), None=integer(), stringsAsFactors=FALSE)
+    #  } else {
+    #    colnames(temp1) <- c("EC", names(tables)[names(tables) %in% m])
+    #  }
+    colnames(temp1)[-1] <- names(tables)[names(tables) %in% m]
+    temp1 <- list(Reduce(function(x, y) anti_join(x, y, by="EC"), c(list(temp1), tables[!names(tables) %in% m])))
+    names(temp1) <- c(
+        paste0(names(tables)[names(tables) %in% m], collapse='&'))
+    temp1
+}
+get_intersect_mean_sum <- function(intersect_tables) {
+    temp <- lapply(intersect_tables, function(t) sum(rowSums(t[-1])) / ncol(t[-1]))
+    temp
+}
+get_normalized_intersections <- function(tables) {
+    total_counts <- sum(sapply(tables, function(t) sum(t$Count)))
+    #tables <- lapply(tables, function(t) data.frame(EC=t$EC, Count=t$Count / sum(t$Count) * total_counts, stringsAsFactors=FALSE))
+    combs <- lapply(lapply(seq(length(methods)), function(i) combn(methods, i, simplify=FALSE)) %>% unlist(recursive=FALSE), function(m) 
+        #get_intersect_mean_sum(
+        get_intersect_table(tables, m))
+    #)
+    combs %>% unlist(recursive=FALSE)
+}
+```
+
+```{r}
+invisible(lapply(seq(length(datasets)), function(j) {
+    pdf(file=paste0("~/reads/human/images/", datasets[[j]], ".upset.norm.tiff"), onefile=FALSE)
+    upset(fromExpression(get_normalized_intersections(ecs[[j]])), order.by="freq")
+    dev.off();
+}))
+```
+
+Alternatively, comment out get_intersect_mean_sum and set recursive=FALSE in the last unlist to get the original intersect tables with all the counts. Then, perform black magic.
+
+```{r}
+norm_intersects <- lapply(ecs, function(d) get_normalized_intersections(d))
+norm_intersects <- lapply(norm_intersects, function(d) lapply(d, function(t) {
+    if (nrow(t[-1]) != 0) {
+        data.frame(AvgCount=rowMeans(t[-1]), Method=paste0(names(t[-1]), collapse='&'))
+    } else {
+        data.frame(AvgCount=integer(), Method=character())
+    }
+}))
+norm_intersects <- lapply(norm_intersects, function(d) d[sort.list(lapply(d, nrow) %>% unlist, decreasing=TRUE)])
+norm_intersects <- lapply(norm_intersects, function(t) do.call(rbind, t))
+```
+
+Scatter plot!
+
+```{r}
+invisible(lapply(seq(length(datasets)), function(j) {
+    g <- ggplot(norm_intersects[[j]], aes(x=Method, y=AvgCount)) + geom_point(size=.5) + theme(axis.title.x=element_blank(), axis.text.x=element_blank(), axis.ticks.x=element_blank())
+    ggsave(paste0("~/reads/human/images", datasets[[j]], ".intersect.boxplot.tif"), device="tiff", dpi=350)
+}))
+```
+
+Bar graph!
+
+```{r}
+norm_intersects_summarized <- lapply(norm_intersects, function(d) d %>% group_by(Method) %>% summarise(Count=sum(AvgCount)))
+
+invisible(lapply(seq(length(datasets)), function(j) {
+    g <- ggplot(norm_intersects_summarized[[j]], aes(x=Method, y=Count)) + geom_col(width=.6) + theme_bw() + theme(axis.title.x=element_blank(), axis.text.x=element_blank(), axis.ticks.x=element_blank(), axis.title.y=element_text(size=20, face="bold"), axis.text.y=element_text(size=20), panel.grid.major = element_blank(), panel.grid.minor = element_blank(), panel.border = element_blank()) + scale_y_reverse()
+    ggsave(paste0("~/reads/human/images/", datasets[[j]], ".intersect.bargraph.tif"), device="tiff", width=12, height=4, dpi=350)
+}))
+```
+
+## EC length histogram.
+
+Functions to do the thing.
+
+```{r}
+get_num_tx_tables <- function(tables) {
+    tables <- lapply(seq(length(tables)), function(i) { tables[[i]]$NumTX <- sapply(tables[[i]]$EC, function(x) length(strsplit(x, ",")[[1]])); tables[[i]] })
+    tables <- lapply(tables, function(t) t %>% group_by(NumTX) %>% summarise(NormCount=sum(Count)))
+    tables <- lapply(seq(length(tables)), function(i) {
+        tables[[i]]$NormCount <- tables[[i]]$NormCount / sum(tables[[i]]$NormCount)
+        tables[[i]]$Method <- methods[[i]]
+        tables[[i]]
+    })
+    bind_rows(tables)
+}
+
+plot_num_tx_hist <- function(table) {
+    table$Method <- factor(table$Method, levels=methods)
+    g <- ggplot(table, aes(x=NumTX, y=NormCount, fill=Method))
+    g <- g + geom_bar(stat="identity", position="dodge", width=1)
+    g <- g + xlim(0, 50) + xlab("EC size") + ylab("")
+    g
+}
+```
+
+Table to do the thing.
+
+```{r}
+num_tx_tables <- lapply(ecs, get_num_tx_tables)
+```
+
+Plotting the thing.
+
+```{r}
+invisible(lapply(seq(length(num_tx_tables)), function(i) {
+    plot_num_tx_hist(num_tx_tables[[i]]) + labs(title=paste0("Distribution of EC sizes (", datasets[[i]], ")"))
+    ggsave(paste0("~/reads/human/images/", datasets[[i]], ".EC.length.hist.tif"), device="tiff", dpi=350)
+}))
+```
+
+## Numbers about the thing.
+kallisto has an EC of size 1046 for all four ZIKA paired-end datasets. That's not a bug in my R code here. It has a count of 1 for all datasets except SRR3191545, where it has a count of 2.
+
+```{r}
+num_tx_stats <- lapply(num_tx_tables, function(t) Reduce(rbind, lapply(methods, function(m) {
+    temp <- filter(t, Method == m)
+    data.frame(Method=m, Mean=weighted.mean(temp$NumTX, temp$NormCount), Max=max(temp$NumTX))
+})))
+names(num_tx_stats) <- datasets
+num_tx_stats
+Reduce(rbind, lapply(methods, function(m) { temp <- (num_tx_stats %>% melt %>% filter(variable == "Mean" & Method == m))$value; data.frame(Method = m, Mean = mean(temp), SD = sd(temp)) }))
+```
+
+This doesn't work. Halfway through writing it, I decided I didn't even want the end product. But I'm keeping it here anyway.
+
+```{r}
+num_tx_stats <- lapply(methods, function(m) {
+    temp <- lapply(num_tx_tables, function(t) filter(t, Method == m))
+    means <- lapply(temp, function(t) weighted.mean(t$NumTX, t$NormCount))
+    max_lengths <- lapply(temp, function(t) max(t$NumTX))
+})
+```
+
+
+## ECs in intersections.
+Looking at the differences between those EC that are in kallisto/Salmon but not in STAR/HISAT2.
+
+```{r}
+join_ECs <- function(table, method1, method2) {
+    temp <- inner_join(table[[method1]], table[[method2]], "EC")
+    colnames(temp) <- c("EC", method1, method2)
+    temp
+}
+
+temp1 <- lapply(ecs, function(x) join_ECs(x, "kallisto", "Salmon"))
+temp2 <- lapply(ecs, function(x) join_ECs(x, "HISAT2", "STAR"))
+kallisto_Salmon <- mapply(function(x, y) list(anti_join(x, y, "EC")), temp1, temp2)
+HISAT2_STAR <- mapply(function(x, y) list(anti_join(x, y, "EC")), temp2, temp1)
+rm(temp1, temp2)
+
+head(kallisto_Salmon[[1]])
+tail(kallisto_Salmon[[1]])
+head(HISAT2_STAR[[1]])
+tail(HISAT2_STAR[[1]])
+```
+
+Write the intersections to file as a TCC matrix (somewhat) readable by kallisto pseudoquant (after I put it through the sparse matrix debug function).
+
+This gives me the ability to get transcript abundances in the intersection, and from there, gene abundances. If transcript and gene abundance correlations are high, chances are, these ECs have a lot of overlapping transcripts. If not, I know which genes I should take a look at in IGV.
+
+```{r}
+write_TCC <- function(fileprefix, table, count_col, ref_ec) {
+    table <- merge(ref_ec, table, by="EC", all=TRUE, sort=FALSE)
+    table <- table[order(table$Index),]
+    temp <- data.frame(c(0:(nrow(table) - 1)), table$EC)
+    write.table(temp, file=paste0(fileprefix, ".ec"), quote=FALSE, sep='\t', row.names=FALSE, col.names=FALSE)
+    temp <- data.frame(c(0:(nrow(table) - 1)), table[colnames(table) == count_col])
+    write.table(temp, file=paste0(fileprefix, ".full.tsv"), quote=FALSE, sep='\t', row.names=FALSE, col.names=FALSE, na="0")
+    
+    file_conn <- file(paste0(fileprefix, ".cells"))
+    writeLines(basename(fileprefix), file_conn)
+    close(file_conn)
+}
+```
+
+```{r}
+ref_ec <- read.table("~/human/kallisto.idx.ec", header=FALSE, sep='\t', stringsAsFactors=FALSE)
+colnames(ref_ec) <- c("Index", "EC")
+write_TCC("~/reads/human/sims/1.kallisto.Salmon", kallisto_Salmon[[1]], "kallisto", ref_ec)
+write_TCC("~/reads/human/sims/1.HISAT2.STAR", HISAT2_STAR[[1]], "HISAT2", ref_ec)
+```
+
+Mean and standard deviation of counts.
+
+The range of the counts is large enough that I think I'll normalize the histogram by the counts of each EC. The means indicate that the counts tend to be low, more so for HISAT2/STAR than for kallisto/Salmon.
+
+```{r}
+kallisto_Salmon_stats <- sapply(kallisto_Salmon, function(x) c(paste("Mean", mean(x$kallisto), "SD", sd(x$kallisto), "Range:", min(x$kallisto), "-", max(x$kallisto)), paste("Mean", mean(x$Salmon), "SD", sd(x$Salmon), "Range:", min(x$Salmon), "-", max(x$Salmon))))
+colnames(kallisto_Salmon_stats) <- datasets
+rownames(kallisto_Salmon_stats) <- c("kallisto", "Salmon")
+
+HISAT2_STAR_stats <- sapply(HISAT2_STAR, function(x) c(paste("Mean", mean(x$HISAT2), "SD", sd(x$HISAT2), "Range:", min(x$HISAT2), "-", max(x$HISAT2)), paste("Mean", mean(x$STAR), "SD", sd(x$STAR), "Range:", min(x$STAR), "-", max(x$STAR))))
+colnames(HISAT2_STAR_stats) <- datasets
+rownames(HISAT2_STAR_stats) <- c("HISAT2", "STAR")
+
+kallisto_Salmon_stats
+HISAT2_STAR_stats
+```
+
+Mean and standard deviation of differences between counts.
+
+The counts tend not to differ much between the two methods. But then, I think that's true between all the methods, for the most part.
+
+```{r}
+kallisto_Salmon_diff <- lapply(kallisto_Salmon, function(x) paste("Mean:", mean(x$kallisto - x$Salmon), "SD:", sd(x$kallisto - x$Salmon)))
+names(kallisto_Salmon_diff) <- datasets
+
+HISAT2_STAR_diff <- lapply(HISAT2_STAR, function(x) paste("Mean:", mean(x$HISAT2 - x$STAR), "SD:", sd(x$HISAT2 - x$STAR)))
+names(HISAT2_STAR_diff) <- datasets
+
+kallisto_Salmon_diff
+HISAT2_STAR_diff
+```
+
+Plotting the number of transcripts per EC.
+
+```{r}
+add_num_tx_col <- function(table) {
+    table$num_tx <- sapply(table$EC, function(x) length(strsplit(x, ",")[[1]]))
+    table
+}
+
+kallisto_Salmon <- lapply(kallisto_Salmon, add_num_tx_col)
+HISAT2_STAR <- lapply(HISAT2_STAR, add_num_tx_col)
+tail(kallisto_Salmon[[1]])
+tail(HISAT2_STAR[[1]])
+
+kallisto_Salmon_hist <- lapply(kallisto_Salmon, function(x) x %>% group_by(num_tx) %>% summarise(count=sum(kallisto)))
+HISAT2_STAR_hist <- lapply(HISAT2_STAR, function(x) x %>% group_by(num_tx) %>% summarise(count=sum(HISAT2)))
+for (i in 1:length(datasets)) {
+    kallisto_Salmon_hist[[i]]$method <- "kallisto/Salmon"
+    HISAT2_STAR_hist[[i]]$method <- "HISAT2/STAR"
+}
+
+intersect_tx_count_hist <- mapply(function(x, y) list(rbind(x, y)), kallisto_Salmon_hist, HISAT2_STAR_hist)
+for (i in 1:length(datasets)) {
+    intersect_tx_count_hist[[i]]$count[intersect_tx_count_hist[[i]]$method == "kallisto/Salmon"] <- intersect_tx_count_hist[[i]]$count[intersect_tx_count_hist[[i]]$method == "kallisto/Salmon"] / sum(intersect_tx_count_hist[[i]]$count[intersect_tx_count_hist[[i]]$method == "kallisto/Salmon"])
+    
+    intersect_tx_count_hist[[i]]$count[intersect_tx_count_hist[[i]]$method == "HISAT2/STAR"] <- intersect_tx_count_hist[[i]]$count[intersect_tx_count_hist[[i]]$method == "HISAT2/STAR"] / sum(intersect_tx_count_hist[[i]]$count[intersect_tx_count_hist[[i]]$method == "HISAT2/STAR"])
+}
+
+head(intersect_tx_count_hist[[1]])
+tail(intersect_tx_count_hist[[1]])
+
+plot_intersect_hist <- function(table) {
+    g <- ggplot(table, aes(x=num_tx, y=count, fill=method))
+    g <- g + geom_bar(stat="identity", position="dodge", width=1)
+    g
+}
+```
+
+```{r}
+for (i in 1:length(datasets)) {
+    g <- plot_intersect_hist(intersect_tx_count_hist[[i]])
+    g
+    ggsave(paste0("~/reads/human/", datasets[[i]], "/", datasets[[i]], ".intersect_tx_norm.tif"), device="tiff", dpi=350)
+}
+```
+
+I want to say that generally, HISAT2/STAR has larger ECs. They definitely skew further to the right. And kallisto/Salmon generally has a great many ECs with one transcript. But kallisto still has a reasonable number (though smaller) number of larger ECs.

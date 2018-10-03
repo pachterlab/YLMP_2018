@@ -1,0 +1,17 @@
+
+sims = range(1, 11)
+
+rule all:
+	input:
+		expand('/home/lynnyi/YLMP_2018/sims/abundance_{i}.kallisto.tsv', i=sims)
+
+rule kallisto:
+	input:
+		'/home/lynnyi/dirichlet/6.3_sims_exp/rsem_perturb/{i}.results_1.fq',
+		'/home/lynnyi/dirichlet/6.3_sims_exp/rsem_perturb/{i}.results_2.fq'
+	output:
+		'/home/lynnyi/YLMP_2018/sims/abundance_{i}.kallisto.tsv'
+	shell:
+		"""
+		kallisto quant -i /home/leliu/human/human_gtf.idx  -o . -l 187 -s 70 /home/lynnyi/dirichlet/6.3_sims_exp/rsem_perturb/{wildcards.i}.results_1.fq /home/lynnyi/dirichlet/6.3_sims_exp/rsem_perturb/{wildcards.i}.results_2.fq
+		"""

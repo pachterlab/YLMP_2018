@@ -3,15 +3,29 @@ sims = range(1, 11)
 
 rule all:
 	input:
-		expand('/home/lynnyi/YLMP_2018/sims/abundance_{i}.kallisto.tsv', i=sims)
+		expand('/home/lynnyi/YLMP_2018/sims/quant/{i}/abundance.tsv', i=sims),
+		expand('/home/lynnyi/YLMP_2018/sims/pseudo/{i}/abundance_{i}.tsv', i=sims)
 
 rule kallisto:
 	input:
 		'/home/lynnyi/dirichlet/6.3_sims_exp/rsem_perturb/{i}.results_1.fq',
 		'/home/lynnyi/dirichlet/6.3_sims_exp/rsem_perturb/{i}.results_2.fq'
 	output:
-		'/home/lynnyi/YLMP_2018/sims/abundance_{i}.kallisto.tsv'
+		'/home/lynnyi/YLMP_2018/sims/{i}/abundance.tsv'
 	shell:
 		"""
-		kallisto quant -i /home/leliu/human/human_gtf.idx  -o . -l 187 -s 70 /home/lynnyi/dirichlet/6.3_sims_exp/rsem_perturb/{wildcards.i}.results_1.fq /home/lynnyi/dirichlet/6.3_sims_exp/rsem_perturb/{wildcards.i}.results_2.fq
+		kallisto quant -i /home/leliu/human/human_gtf.idx  -o /home/lynnyi/YLMP_2018/sims/{wildcards.i}/ -l 187 -s 70 /home/lynnyi/dirichlet/6.3_sims_exp/rsem_perturb/{wildcards.i}.results_1.fq /home/lynnyi/dirichlet/6.3_sims_exp/rsem_perturb/{wildcards.i}.results_2.fq
+		"""
+
+rule pseudo:
+	input:
+	output:
+		'/home/lynnyi/YLMP_2018/sims/pseudo/{i}/abundance_{i}.tsv'
+	shell:
+		"""
+		/home/lynnyi/pseudoquant/build/src/kallisto pseudo -i /home/leliu/human/human_gtf.idx -o /home/lynnyi/YLMP_2018/sims/pseudo/{wildcards.i} /home/lynnyi/dirichlet/6.3_sims_exp/rsem_perturb/{wildcards.i}.results_1.fq /home/lynnyi/dirichlet/6.3_sims_exp/rsem_perturb/{wildcards.i}.results_2.fq
+		/home/leliu/bam2tcc/build/src/debug -x /home/lynnyi/YLMP_2018/sims/pseudo/{wildcards.i}/pseudoalignments.tsv /home/lynnyi/YLMP_2018/sims/pseudo/{wildcards.i}/matrix.tsv
+		echo "{wildcards.i}" > /home/lynnyi/YLMP_2018/sims/pseudo/{wildcards.i}/matrix.cells
+		cp /home/lynnyi/YLMP_2018/sims/pseudo/{wildcards.i}/pseudoalignments.ec /home/lynnyi/YLMP_2018/sims/pseudo/{wildcards.i}/matrix.ec
+		/home/lynnyi/pseudoquant/build/src/kallisto pseudoquant -i /home/leliu/human/human_gtf.idx -o /home/lynnyi/YLMP_2018/sims/pseudo/{wildcards.i} i-d /home/lynnyi/YLMP_2018/sims/pseudo/{wildcards.i} -l 187 -s 70"
 		"""

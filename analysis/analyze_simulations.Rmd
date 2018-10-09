@@ -1,0 +1,217 @@
+---
+title: "Abundance Analysis"
+author: "Lauren Liu, Lynn Yi"
+date: "10/3/2018"
+output: html_document
+---
+
+We use this script to plot figure 1, the distribution MARDs and Mean Absolute Differences for the simulations. We also use this script to perform cross-method correlations across the simulations.
+
+# Analysis of abundances.
+
+```{r}
+library(dplyr)
+library(ggplot2)
+library(reshape2)
+```
+
+```{r}
+#abundance mode can be either gene or transcript
+abundance_mode <- "gene"
+join_by <- paste0(abundance_mode, "_id")
+```
+
+```{r}
+base_path <- "/home/leliu/reads/human/sims/"
+methods <- c("Salmon", "HISAT2", "STAR")
+#methods <- c("kallisto", "Salmon_0.8.2", "Salmon", "HISAT2", "STAR", "quant")
+
+datasets <- c(1:10)
+#datasets <- c("SRR3191542")#, "SRR3191543", "SRR3191544", "SRR3191545")
+```
+
+## Reading in tables.
+### Loading files.
+
+Read in the gene-transcript mapping so that we can perform gene counts if we so desire.
+
+```{r}
+gene_table <- read.table("/home/leliu/human/Homo_sapiens.GRCh38.92.chr.transcripts", sep='\t', header = FALSE, stringsAsFactors = FALSE)
+names(gene_table) <- c("gene_id", "transcript_id")
+head(gene_table)
+tail(gene_table)
+dim(gene_table)
+```
+
+```{r}
+read_counts <- function(path) {
+    table <- read.table(path, header = TRUE, stringsAsFactors = FALSE)
+    # Get rid of all the columns we don't need.
+    table$length <- NULL
+    table$eff_length <- NULL
+    table$tpm <- NULL
+    table$gene_id <- NULL
+    table$length <- NULL
+    table$effective_length <- NULL
+    table$TPM <- NULL
+    table$FPKM <- NULL
+    table$IsoPct <- NULL
+    if ("est_counts" %in% names(table)) {
+        table$count <- table$est_counts
+        table$est_counts <- NULL
+    }
+    #table <- table[table$count!=0,]
+    if ("target_id" %in% names(table)) {
+        table$transcript_id <- table$target_id
+        table$target_id <- NULL
+    }
+    if (abundance_mode == "gene") {
+        table <- get_gene_abundances(table, "count")
+    }
+    table
+}
+```
+
+
+Read Abundances
+```{r}
+methods <- c("Salmon", "HISAT2", "STAR")
+abundances <- lapply(datasets, function(d) lapply(methods, function(m) read_counts(paste0(base_path, "abundance_",  d, ".", m,".tsv"))))
+abundances <- lapply(abundances, function(d) lapply(c(1:length(methods)), function(i) { names(d[[i]])[names(d[[i]]) == "count"] <- methods[[i]]; d[[i]] }))
+
+head(abundances[[1]][[1]])
+tail(abundances[[1]][[1]])
+```
+
+
+Read kallisto and append to abundances
+```{r}
+kallisto <- lapply(datasets, function(i) read_counts(paste0('/home/lynnyi/YLMP_2018/sims/quant/', i, '/abundance.tsv')))
+kallisto <- lapply(kallisto, function(k) { names(k)[names(k) == "count"] <- 'kallisto'; return(k) })
+abundances <- lapply(1:10, function(i) append(kallisto[i], abundances[[i]]))
+head(abundances[[1]][[1]])
+methods <- append('kallisto', methods)
+```
+
+
+Read true abundances from simulation
+```{r}
+true_abundances <- lapply(datasets, function(x)  read_counts(paste0("/home/lynnyi/dirichlet/6.3_sims_exp/rsem_perturb/", x, ".results.sim.isoforms.results")))
+head(true_abundances[[1]])
+tail(true_abundances[[1]])
+```
+
+
+Join abundance tables
+```{r}
+abundances <- lapply(1:10, function(i) do.call(cbind, abundances[[i]]))
+#remove duplicated transcript_id columns
+abundances <- lapply(1:10, function(i) abundances[[i]][, !duplicated(colnames(abundances[[i]]))])
+abundances <- lapply(1:10, function(i) merge(abundances[[i]], true_abundances[[i]], by=join_by))
+```
+
+
+#Fig 1 expressed and nonexpressed transcripts
+```{r}
+expressed <- lapply(abundances, function(i) filter(data.frame(i), count > 0))
+nonexpressed <- lapply(abundances, function(i) filter(data.frame(i), count == 0))
+```
+
+
+Calculate the MARDs
+```{r}
+expressed_error <- lapply(1:10, function(i) lapply(methods, function(m) (expressed[[i]][[m]] - expressed[[i]]$count)/expressed[[i]]$count))
+nonexpressed_error <- lapply(1:10, function(i) lapply(methods, function(m) nonexpressed[[i]][[m]] - nonexpressed[[i]]$count))
+```
+
+
+```{r}
+MARDs <- lapply(expressed_error, function(sim) sapply(sim, function(errors) mean(abs(errors))))
+MADs <- lapply(nonexpressed_error, function(sim) sapply(sim, function(errors) mean(abs(errors))))
+
+MARDs <- do.call(cbind, MARDs)
+MADs <- do.call(cbind, MADs)
+
+rownames(MARDs) <- methods
+rownames(MADs) <- methods
+```
+
+```{r}
+MARDs <- melt(MARDs)
+names(MARDs) <- c('method', 'trial', 'MARD')
+
+MADs <- melt(MADs)
+names(MADs) <- c('method', 'trial', 'MAD')
+```
+
+
+### Plotting MARDs (Fig1)
+```{r}
+p <- ggplot(data=MARDs, aes(x=method, y=MARD, colour=method)) + geom_boxplot() +
+  geom_jitter(height=0, width=0) + guides(colour=FALSE) + ylab(paste0("Mean Absolute Relative Difference (MARD)")) + xlab("Method") + ylim(0.1, 0.45) +
+  theme(text = element_text(size=14), axis.text.x = element_text(angle=15, hjust=1))
+print(p)
+ggsave(paste0("/home/lynnyi/YLMP_2018/sims/sims.MARDs.", abundance_mode, ".tif"), device="tiff", dpi=350)
+```
+
+### Plotting... MADs? (Fig1)
+```{r}
+g <- ggplot(data=MADs, aes(x=method, y=MAD, colour=method)) + geom_boxplot() + geom_jitter(height=0, width = 0) + guides(colour=FALSE) + ylab(paste0("Mean Absolute Difference")) + xlab("Method") + ylim(0.0, 1.5) + theme(text = element_text(size=14), axis.text.x = element_text(angle=15, hjust=1))
+print(g)
+ggsave(paste0("/home/lynnyi/YLMP_2018/sims/sims.MADs.", abundance_mode, ".tif"), device="tiff", dpi=350)
+```
+
+Calculating correlations
+Make abundances numeric and log the counts
+
+```{r}
+count_matrices <- lapply(abundances, function(ab) {
+  rownames(ab) <- ab[[join_by]]
+  ab[[join_by]] <- NULL
+  ab <- log(ab+1)
+  colnames(ab) <- c('kallisto', 'Salmon', 'HISAT2', 'STAR', 'ground truth')
+  ab
+})
+
+pearson <- lapply(count_matrices, function(counts){
+  cor(counts, method='pearson')
+})
+spearman <- lapply(count_matrices, function(counts){
+  cor(counts, method='spearman')
+})
+```
+
+Calculate average pearson and spearman correlations
+
+```{r}
+pearson_mean <- apply(simplify2array(pearson), 1:2, mean)
+pearson_sd <- apply(simplify2array(pearson), 1:2, sd)
+spearman_mean <- apply(simplify2array(spearman), 1:2, mean)
+spearman_sd <- apply(simplify2array(spearman), 1:2, sd)
+```
+
+```{r}
+round(pearson_mean, 4)
+round(pearson_sd, 4)
+round(spearman_mean, 3)
+round(spearman_sd, 3)
+```
+
+
+```{r}
+library(stargazer)
+
+stargazer(pearson_mean, digits=3, title='Pearson Correlations (log(counts+1))')
+stargazer(spearman_mean, digits=3, title='Spearman Correlations (log(counts+1))')
+```
+
+
+
+GENE Tables
+Convert transcript abundances to gene abundances.
+```{r eval = FALSE}
+gene_abundances <- lapply(abundances, function(abd)
+{
+  inner_join(abd, gene_table, by='transcript_id') %>% group_by(gene_id) %>% summarise(kallisto = sum(kallisto), Salmon = sum(Salmon), HISAT2 = sum(HISAT2), STAR = sum(STAR), count = sum(count))
+})
+```

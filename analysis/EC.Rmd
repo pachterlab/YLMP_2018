@@ -38,11 +38,10 @@ read_tcc <- function(path) {
 Change path here to choose between simulations and Zika datasets.
 
 ```{r}
-base_path <- "~/reads/human/"
-#base_path <- "~/reads/human/sims/"
-datasets <- c("SRR3191542", "SRR3191543", "SRR3191544", "SRR3191545")
-#datasets <- c(1:10)
-#datasets <- c("SRR4045930")#, "SRR4045931")
+base_path <- "/home/leliu/reads/human/"
+#datasets <- c("SRR3191542", "SRR3191543", "SRR3191544", "SRR3191545")
+#datasets <- c("SRR4045930"), "SRR4045931")
+datasets <- c("SRR3191542")
 methods <- c("kallisto", "Salmon_0.8.2", "Salmon", "HISAT2", "STAR")
 ecs <- lapply(datasets, function(d) lapply(methods, function(m) read_tcc(paste0(base_path, d, "/", m, "/matrix"))))
 #ecs <- lapply(datasets, function(d) lapply(methods, function(m) read_tcc(paste0(base_path, d, ".", m))))
@@ -53,6 +52,9 @@ ecs <- lapply(seq(length(datasets)), function(i) { names(ecs[[i]]) <- methods; e
 
 tail(ecs[[1]][[1]])
 ```
+```{r}
+#kallisto <- '~/YLMP_2018/zika/pseudo/SRR3191542/matrix'
+```
 
 ## Simple upset plots.
 
@@ -61,7 +63,7 @@ to_plot <- lapply(ecs, function(e) lapply(e, function(x) x$EC))
 to_plot <- lapply(seq(length(datasets)), function(j) { names(to_plot[[j]]) <- methods; to_plot[[j]] })
 
 invisible(lapply(seq(length(datasets)), function(j) {
-    pdf(file=paste0("~/reads/human/images/", datasets[[j]], ".upset.pdf"), onefile=FALSE)
+    pdf(file=paste0("~/YLMP_2018/zika/", datasets[[j]], ".upset.pdf"), onefile=FALSE)
     upset(fromList(to_plot[[j]]), sets=methods, keep.order=TRUE, order.by="freq")
     dev.off();
 }))
@@ -101,7 +103,7 @@ get_normalized_intersections <- function(tables) {
 
 ```{r}
 invisible(lapply(seq(length(datasets)), function(j) {
-    pdf(file=paste0("~/reads/human/images/", datasets[[j]], ".upset.norm.tiff"), onefile=FALSE)
+    pdf(file=paste0("~/YLMP_2018/zika/", datasets[[j]], ".upset.norm.tiff"), onefile=FALSE)
     upset(fromExpression(get_normalized_intersections(ecs[[j]])), order.by="freq")
     dev.off();
 }))
@@ -138,14 +140,13 @@ norm_intersects_summarized <- lapply(norm_intersects, function(d) d %>% group_by
 
 invisible(lapply(seq(length(datasets)), function(j) {
     g <- ggplot(norm_intersects_summarized[[j]], aes(x=Method, y=Count)) + geom_col(width=.6) + theme_bw() + theme(axis.title.x=element_blank(), axis.text.x=element_blank(), axis.ticks.x=element_blank(), axis.title.y=element_text(size=20, face="bold"), axis.text.y=element_text(size=20), panel.grid.major = element_blank(), panel.grid.minor = element_blank(), panel.border = element_blank()) + scale_y_reverse()
-    ggsave(paste0("~/reads/human/images/", datasets[[j]], ".intersect.bargraph.tif"), device="tiff", width=12, height=4, dpi=350)
+    ggsave(paste0("~/YLMP_2018/zika/", datasets[[j]], ".intersect.bargraph.tif"), device="tiff", width=12, height=4, dpi=350)
 }))
 ```
 
 ## EC length histogram.
 
-Functions to do the thing.
-
+Functions to calculate weighted EC size.
 ```{r}
 get_num_tx_tables <- function(tables) {
     tables <- lapply(seq(length(tables)), function(i) { tables[[i]]$NumTX <- sapply(tables[[i]]$EC, function(x) length(strsplit(x, ",")[[1]])); tables[[i]] })
@@ -167,24 +168,24 @@ plot_num_tx_hist <- function(table) {
 }
 ```
 
-Table to do the thing.
-
+Table listing number transcripts and number of counts.
 ```{r}
 num_tx_tables <- lapply(ecs, get_num_tx_tables)
 ```
 
-Plotting the thing.
-
+Plotting the distribution of EC sizes (as weighted by counts)
 ```{r}
 invisible(lapply(seq(length(num_tx_tables)), function(i) {
-    plot_num_tx_hist(num_tx_tables[[i]]) + labs(title=paste0("Distribution of EC sizes (", datasets[[i]], ")"))
-    ggsave(paste0("~/reads/human/images/", datasets[[i]], ".EC.length.hist.tif"), device="tiff", dpi=350)
+    plot_num_tx_hist(num_tx_tables[[i]]) + labs(title=paste0("Distribution of EC sizes (", datasets[[i]], ")")) + 
+    theme(text = element_text(size=20))
+    ggsave(paste0("~/YLMP_2018/zika/", datasets[[i]], ".EC.length.hist.tif"), device="tiff", dpi=350, width = 9)
 }))
 ```
 
 ## Numbers about the thing.
 kallisto has an EC of size 1046 for all four ZIKA paired-end datasets. That's not a bug in my R code here. It has a count of 1 for all datasets except SRR3191545, where it has a count of 2.
 
+Calculating mean weighted EC size.
 ```{r}
 num_tx_stats <- lapply(num_tx_tables, function(t) Reduce(rbind, lapply(methods, function(m) {
     temp <- filter(t, Method == m)

@@ -17,7 +17,7 @@ library(reshape2)
 
 ```{r}
 #abundance mode can be either gene or transcript
-abundance_mode <- "gene"
+abundance_mode <- "transcript"
 join_by <- paste0(abundance_mode, "_id")
 ```
 
@@ -41,6 +41,11 @@ names(gene_table) <- c("gene_id", "transcript_id")
 head(gene_table)
 tail(gene_table)
 dim(gene_table)
+
+get_gene_abundances <- function(table, counts_column) {
+    temp <- sym(counts_column)
+    inner_join(table, gene_table, by="transcript_id") %>% group_by(gene_id) %>% summarise(!! counts_column := sum(!! temp))
+}
 ```
 
 ```{r}
@@ -86,7 +91,7 @@ tail(abundances[[1]][[1]])
 
 Read kallisto and append to abundances
 ```{r}
-kallisto <- lapply(datasets, function(i) read_counts(paste0('/home/lynnyi/YLMP_2018/sims/quant/', i, '/abundance.tsv')))
+kallisto <- lapply(datasets, function(i) read_counts(paste0('/home/lynnyi/YLMP_2018/sims/pseudo/', i, '/abundance_', i, '.tsv')))
 kallisto <- lapply(kallisto, function(k) { names(k)[names(k) == "count"] <- 'kallisto'; return(k) })
 abundances <- lapply(1:10, function(i) append(kallisto[i], abundances[[i]]))
 head(abundances[[1]][[1]])

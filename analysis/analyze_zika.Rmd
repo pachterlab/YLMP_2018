@@ -1,0 +1,98 @@
+---
+title: "Abundance Analysis"
+author: "Lauren Liu"
+date: "8/6/2018"
+output: html_document
+---
+# Analysis of abundances.
+
+```{r}
+library(dplyr)
+library(ggplot2)
+library(reshape2)
+```
+
+```{r}
+abundance_mode <- "transcript"
+join_by <- paste0(abundance_mode, "_id")
+```
+
+```{r}
+base_path <- "/home/leliu/reads/human/"
+methods <- c("Salmon_0.8.2", "Salmon", "HISAT2", "STAR")#, "diff.1", "diff.1.inc", "diff.2", "diff.3", "diff.4")
+datasets <- c("SRR3191542")#, "SRR3191543", "SRR3191544", "SRR3191545")
+#datasets <- c('SRR4045930')
+#methods <- c("kallisto", "Salmon", "HISAT2", "STAR")#, "diff.1", "diff.1.inc", "diff.2", "diff.3", "diff.4")
+
+```
+
+## Reading in tables.
+### Loading files.
+
+
+```{r}
+read_counts <- function(path) {
+    table <- read.table(path, header = TRUE, stringsAsFactors = FALSE)
+    # Get rid of all the columns we don't need.
+    table$length <- NULL
+    table$eff_length <- NULL
+    table$tpm <- NULL
+    table$gene_id <- NULL
+    table$length <- NULL
+    table$effective_length <- NULL
+    table$TPM <- NULL
+    table$FPKM <- NULL
+    table$IsoPct <- NULL
+    if ("est_counts" %in% names(table)) {
+        table$count <- table$est_counts
+        table$est_counts <- NULL
+    }
+    #table <- table[table$count!=0,]
+    if ("target_id" %in% names(table)) {
+        table$transcript_id <- table$target_id
+        table$target_id <- NULL
+    }
+    if (abundance_mode == "gene") {
+        table <- get_gene_abundances(table, "count")
+    }
+    table
+}
+```
+
+```{r}
+abundances <- lapply(datasets, function(d) lapply(methods, function(m) read_counts(paste0(base_path, d, "/", m, "/abundance_",  m,".tsv"))))
+kallisto <- lapply(datasets, function(d) read_counts(paste0('/home/lynnyi/YLMP_2018/zika/pseudo/',d,'/abundance_',d,'.tsv')))
+methods <- c("kallisto", "Salmon_0.8.2", "Salmon_0.11.2", "HISAT2", "STAR")
+
+abundances <- lapply(abundances, function(d) lapply(c(1:length(methods)), function(i) { names(d[[i]])[names(d[[i]]) == "count"] <- methods[[i]]; d[[i]] }))
+
+head(abundances[[1]][[1]])
+tail(abundances[[1]][[1]])
+```
+
+
+```{r}
+abundances <- abundances[[1]]
+abundances <- do.call(cbind, abundances)
+abundances <- abundances[, !duplicated(colnames(abundances))]
+```
+
+```{r}
+rownames(abundances) <- abundances$transcript_id
+abundances$transcript_id <- NULL
+```
+
+```{r}
+pearson <- cor(log(abundances+1), method='pearson')
+spearman <- cor(log(abundances+1), method='spearman')
+```
+
+
+```{r}
+library(stargazer)
+stargazer(pearson)
+stargazer(spearman)
+```
+
+
+
